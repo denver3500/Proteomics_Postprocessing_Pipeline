@@ -1,0 +1,14 @@
+# Data: nothing in Input/ is tracked except the approved sample sheets
+Input/**
+!Input/*/
+
+# Generated
+results/
+.snakemake/
+
+# R / Python / OS clutter
+.Rhistory
+.RData
+.Rproj.user/
+__pycache__/
+.DS_Store

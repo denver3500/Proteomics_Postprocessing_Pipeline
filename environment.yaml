@@ -1,0 +1,8 @@
+name: proteomics
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - snakemake-minimal >=9
+  - r-base >=4.4
+  - r-tidyverse
