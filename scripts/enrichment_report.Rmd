@@ -1,0 +1,85 @@
+---
+title: "Enrichment report"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    mathjax: null
+params:
+  rmd: ""
+---
+
+```{r setup, include = FALSE}
+# Gene sets + GSEA and ORA results of one collection (scripts/gsea.R, scripts/ora.R) -> one enrichment report
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+source("scripts/common.R")
+
+collection <- snakemake@wildcards$collection
+proteins   <- read_tsv(snakemake@input$intensities, show_col_types = FALSE)
+sets       <- read_tsv(snakemake@input$gene_sets, show_col_types = FALSE)
+species    <- detect_species(proteins)
+gsea       <- unlist(snakemake@input$gsea)  # empty when not flagged in enrichment.tsv
+ora        <- unlist(snakemake@input$ora)   # one folder per significance criterion
+criteria   <- snakemake@params$criteria
+
+detected  <- n_distinct(first_gene(proteins$gene))
+annotated <- n_distinct(sets$gene)
+tested    <- sets |> count(term) |> filter(between(n, MIN_SET_SIZE, MAX_SET_SIZE)) |> nrow()
+
+overview <- tribble(
+  ~item, ~value,
+  "Dataset", snakemake@wildcards$dataset,
+  "Collection", str_glue("{collection}: {msigdb_source(snakemake@params$msigdb, species)$note}"),
+  "Sets tested", str_glue("{tested} ({MIN_SET_SIZE}-{MAX_SET_SIZE} of their genes detected)"),
+  "Detected genes in any set", str_glue("{annotated} of {detected} ({round(100 * annotated / detected)}%)"),
+  "Enriched if", str_glue("padj < {ENRICH_PADJ}"),
+  "Methods", str_flatten_comma(c(if (length(gsea)) "GSEA", if (length(ora)) "ORA"))
+)
+
+# One section: enriched sets per contrast, the overview when there is one, then one tab per contrast
+section <- function(title, folder, intro, columns) {
+  summary <- read_tsv(file.path(folder, "summary.tsv"), show_col_types = FALSE)
+  cat("\n\n## ", title, " {.tabset .tabset-dropdown}\n\n", intro, "\n\n### Enriched sets per contrast\n\n", sep = "")
+  cat(knitr::kable(select(summary, all_of(columns)), col.names = names(columns)), sep = "\n")
+  if (dir.exists(file.path(folder, "figures", "overview"))) {
+    cat("\n\n### All contrasts\n\n", figure_image(folder, "figures", "overview"), "\n", sep = "")
+  }
+  for (i in seq_len(nrow(summary))) {
+    cat("\n\n### ", summary$label[i], "\n\n", figure_image(folder, "figures", summary$contrast[i]), "\n", sep = "")
+  }
+}
+```
+
+## Summary
+
+```{r}
+knitr::kable(overview, col.names = NULL)
+```
+
+```{r, results = "asis"}
+if (length(gsea)) {
+  section(
+    "GSEA", gsea,
+    "All detected proteins ranked by the contrast's limma t statistic; no significance cutoff. Pick a contrast from the menu.",
+    c(contrast = "label", "file name" = "contrast", "sets up" = "up", "sets down" = "down", "sets tested" = "tested")
+  )
+}
+for (folder in ora) {
+  criterion <- basename(folder)
+  section(
+    str_glue("ORA: {criterion}"), folder,
+    str_glue("Significant proteins ({describe_criterion(criteria[[criterion]])}), up and down tested separately. Pick a contrast from the menu."),
+    c(contrast = "label", "file name" = "contrast", "proteins up" = "genes_up", "sets up" = "up",
+      "proteins down" = "genes_down", "sets down" = "down")
+  )
+}
+```
+
+## How to read this
+
+- **GSEA** (gene set enrichment analysis, fgsea): all detected proteins are ranked by the limma moderated t of the contrast A vs B. A set with a positive NES (normalized enrichment score) has its proteins near the top, i.e. higher in A; negative NES, higher in B. It needs no significance cutoff and picks up sets whose proteins shift together, even when few of them are significant on their own.
+- **ORA** (over-representation analysis): are the significant up (or down) proteins found in a set more often than expected from all detected proteins in the collection? Hypergeometric test, one per significance criterion. **Fold enrichment** = share of the significant proteins that fall in the set / share of all detected proteins that do. Proteins up and down only count when they belong to at least one set of the collection.
+- **padj**: Benjamini-Hochberg within each contrast (and direction, for ORA). A set is called enriched at padj < `r ENRICH_PADJ`.
+- **Genes**: a protein group counts as its first gene; sets are tested on the `r MIN_SET_SIZE`-`r MAX_SET_SIZE` of their genes detected in this dataset, so set sizes are smaller than in MSigDB.
+- **Tables** in `enrichment/<collection>/`: `gene_sets.tsv` (the sets used), `gsea/A_vs_B.tsv` (every set; leading_edge = the genes driving the enrichment), `ora/<criterion>/A_vs_B.tsv` (sets sharing at least one significant protein; genes = those proteins).
+- **Figures**: each plot is also in its own folder with its data and a script to restyle it: `gsea/figures/<A_vs_B>/`, `gsea/figures/overview/`, `ora/<criterion>/figures/<A_vs_B>/`.

@@ -46,7 +46,33 @@ Output, results/Dataset/de/:
 - Criterion/figures/: counts, volcano/A_vs_B (one folder per contrast), top-hit heatmap, p-value histograms (see V. Figures)
 - Criterion/de_report.html: counts and all figures in one page
 
-V. Figures
+V. Step 4 - Enrichment
+
+Which gene sets to test, and how, is flagged per dataset in Input/Dataset/enrichment.tsv (tab-separated, editable in Excel). One row per collection; put an x under each method to run, leave it empty (or write no) to skip:
+
+```
+collection    ora   gsea
+hallmark      x     x
+go_bp         x     x
+reactome            x
+kegg          x
+```
+
+Collections: hallmark, go_bp, go_cc, go_mf, reactome, wikipathways, kegg (MSigDB, through the msigdbr package). The species comes from the protein names (_HUMAN, _MOUSE). Mouse uses the mouse MSigDB, except kegg, which the mouse MSigDB lacks: there human KEGG sets are mapped to mouse orthologs. To offer another collection, add it to COLLECTIONS in the Snakefile.
+
+- GSEA: all proteins ranked by the limma t of each contrast; positive NES = the set is higher in A. Needs no significance criteria.
+- ORA: are the up (or down) significant proteins over-represented in a set, compared with all detected proteins in the collection? Runs once for every row of significance.tsv.
+
+A protein group counts as its first gene. Sets are tested when 10-500 of their genes were detected, and are enriched at padj < 0.05 (MIN_SET_SIZE, MAX_SET_SIZE, ENRICH_PADJ in scripts/common.R). The first run downloads each collection, so it needs internet. On an environment created before this step, run "conda env update -n proteomics -f environment.yaml" first.
+
+Output, one folder per collection, results/Dataset/enrichment/Collection/:
+- gene_sets.tsv: the gene sets used (genes detected in this dataset only)
+- gsea/A_vs_B.tsv: every set with NES, p-value, padj and leading-edge genes; gsea/summary.tsv: enriched sets per contrast
+- ora/Criterion/A_vs_B.tsv: sets sharing a significant protein, up and down, with fold enrichment, p-value, padj and those proteins' genes
+- gsea/figures/, ora/Criterion/figures/: one folder per contrast, plus gsea/figures/overview (all contrasts, see VI. Figures)
+- Collection_report.html: all of the above in one page
+
+VI. Figures
 
 Every picture in the reports has its own folder with its data and script, so it can be restyled without rerunning the pipeline:
 
@@ -55,7 +81,7 @@ results/Dataset/qc/figures/pca/                          data.tsv  plot.R  pca.s
 results/Dataset/de/Criterion/figures/volcano/A_vs_B/     data.tsv  contrast.tsv  plot.R  volcano_A_vs_B.svg  volcano_A_vs_B.png
 ```
 
-QC figures: intensities, contaminants, correlation, pca, pca_pairs, cv. DE figures: counts, volcano/A_vs_B (one folder per contrast), top_hits, pvalues.
+QC figures: intensities, contaminants, correlation, pca, pca_pairs, cv. DE figures: counts, volcano/A_vs_B (one folder per contrast), top_hits, pvalues. Enrichment figures: gsea/figures/A_vs_B and ora/Criterion/figures/A_vs_B (one folder per contrast), gsea/figures/overview.
 
 - data.tsv (+ samples.tsv / contrast.tsv for some plots): exactly what is plotted, opens in Excel
 - plot.R: a short ggplot/pheatmap script with settings at the top (size, font size, colours, labels; for volcanos, genes to always label in HIGHLIGHT)

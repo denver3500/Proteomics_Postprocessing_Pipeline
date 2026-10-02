@@ -13,3 +13,5 @@ dependencies:
   - r-ggrepel =0.9.8
   - r-svglite =2.2.2
   - r-png =0.1_9
+  - r-msigdbr =26.1
+  - bioconductor-fgsea =1.36

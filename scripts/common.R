@@ -78,6 +78,38 @@ count_significant <- function(de) {
 OUTLIER_MADS     <- 3   # proteins, contaminants, replicate correlation: > 3 MADs worse than the median
 MAX_MEDIAN_SHIFT <- 1   # median intensity: > 1 log2 (2-fold) away from the typical sample
 N_TOP_HITS       <- 50  # proteins in the DE top-hits heatmap
+MIN_SET_SIZE     <- 10  # enrichment: gene sets are tested when 10-500 of their genes were detected
+MAX_SET_SIZE     <- 500
+ENRICH_PADJ      <- 0.05  # a gene set counts as enriched below this padj
+
+# Enrichment works on genes: a protein group counts as its first gene (that of the leading protein)
+first_gene <- function(gene) str_remove(gene, ";.*")
+
+# Species from UniProt entry names (S10A8_HUMAN), as msigdbr names it and its MSigDB (HS/MM)
+detect_species <- function(proteins) {
+  suffix <- str_match(proteins$protein_name %||% character(), "_([A-Z0-9]+)(;|$)")[, 2]
+  common <- names(which.max(table(suffix)))
+  switch(common %||% "",
+    HUMAN = list(name = "Homo sapiens", db = "HS"),
+    MOUSE = list(name = "Mus musculus", db = "MM"),
+    stop("enrichment supports human and mouse; cannot tell the species from protein names (S10A8_HUMAN), found: ",
+         common %||% "none", call. = FALSE)
+  )
+}
+
+# MSigDB serving a collection (Snakefile COLLECTIONS entry) for this species: its own, or human mapped to orthologs
+msigdb_source <- function(msigdb, species) {
+  db <- if (is.null(msigdb[[species$db]])) "HS" else species$db
+  list(
+    db = db,
+    code = msigdb[[db]],
+    note = str_glue("MSigDB {msigdb[[db]]} (msigdbr {packageVersion('msigdbr')})",
+                    if (db != species$db) ", human sets mapped to {species$name} orthologs" else "")
+  )
+}
+
+# MSigDB set name -> readable label: HALLMARK_MTORC1_SIGNALING -> MTORC1 SIGNALING
+term_label <- function(term) str_replace_all(str_remove(term, "^[A-Z]+_"), "_", " ")
 
 # Figure folder, one per picture: tables (data.tsv, ...) + plot.R, a copy of scripts/figures/<script>.R, run in the
 # folder to draw the picture. The folder works on its own, so it can be copied anywhere and restyled
