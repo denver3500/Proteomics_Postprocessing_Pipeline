@@ -9,3 +9,5 @@ dependencies:
   - r-rmarkdown =2.32
   - pandoc =3.11
   - r-pheatmap =1.0.13
+  - bioconductor-limma =3.66
+  - r-ggrepel =0.9.8
