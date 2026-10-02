@@ -15,7 +15,7 @@ We take counts data (proteinLevelData.tsv and pivot_pack.tsv) and try to deduce 
 
 III. Step 2 - QC
 
-For every approved dataset we write one report, results/Dataset/qc_report.html, and its tables and figures in results/Dataset/qc/ (overview.tsv, sample_metrics.tsv, condition_metrics.tsv, figures/).
+For every approved dataset we write one folder, results/Dataset/qc/, with the report (qc_report.html), its tables (overview.tsv, sample_metrics.tsv, condition_metrics.tsv) and figures/.
 
 The label column of samples.tsv is the readable name of a condition, shown in every report and plot (e.g. "M0 TRAP1 KO, DMEM" instead of M0_KO_DMEM). Use one label per condition; if empty, the condition with spaces instead of underscores is used. Files and folders always use the condition itself.
 
@@ -63,14 +63,18 @@ Collections: hallmark, go_bp, go_cc, go_mf, reactome, wikipathways, kegg (MSigDB
 - GSEA: all proteins ranked by the limma t of each contrast; positive NES = the set is higher in A. Needs no significance criteria.
 - ORA: are the up (or down) significant proteins over-represented in a set, compared with all detected proteins in the collection? Runs once for every row of significance.tsv.
 
+Mixed sets: a set whose proteins go both ways (some up, some down) cancels out in GSEA and is diluted in ORA's up and down lists. So both methods also test the two directions together: GSEA on |t|, ORA on all significant proteins (direction "any"). A set is called mixed when it is enriched only in that combined test, not up or down alone, and its proteins include both directions. Figures show mixed sets in their own panel, with each bar split by how many proteins go each way.
+
 A protein group counts as its first gene. Sets are tested when 10-500 of their genes were detected, and are enriched at padj < 0.05 (MIN_SET_SIZE, MAX_SET_SIZE, ENRICH_PADJ in scripts/common.R). The first run downloads each collection, so it needs internet. On an environment created before this step, run "conda env update -n proteomics -f environment.yaml" first.
 
-Output, one folder per collection, results/Dataset/enrichment/Collection/:
+Output, results/Dataset/enrichment/:
+- enrichment_report.html: every collection in one page (counts per contrast, overview and figures)
+
+and one folder per collection, Collection/:
 - gene_sets.tsv: the gene sets used (genes detected in this dataset only)
-- gsea/A_vs_B.tsv: every set with NES, p-value, padj and leading-edge genes; gsea/summary.tsv: enriched sets per contrast
-- ora/Criterion/A_vs_B.tsv: sets sharing a significant protein, up and down, with fold enrichment, p-value, padj and those proteins' genes
+- gsea/A_vs_B.tsv: every set with NES, p-value, padj and leading-edge genes; any_* columns for the |t| run; n_up/n_down = leading-edge proteins going each way; call = up, down or mixed. gsea/summary.tsv: enriched sets per contrast
+- ora/Criterion/A_vs_B.tsv: sets sharing a significant protein, tested with the up, down and any (both together) lists, with fold enrichment, p-value, padj, those proteins' genes and n_up/n_down
 - gsea/figures/, ora/Criterion/figures/: one folder per contrast, plus gsea/figures/overview (all contrasts, see VI. Figures)
-- Collection_report.html: all of the above in one page
 
 VI. Figures
 
@@ -81,7 +85,7 @@ results/Dataset/qc/figures/pca/                          data.tsv  plot.R  pca.s
 results/Dataset/de/Criterion/figures/volcano/A_vs_B/     data.tsv  contrast.tsv  plot.R  volcano_A_vs_B.svg  volcano_A_vs_B.png
 ```
 
-QC figures: intensities, contaminants, correlation, pca, pca_pairs, cv. DE figures: counts, volcano/A_vs_B (one folder per contrast), top_hits, pvalues. Enrichment figures: gsea/figures/A_vs_B and ora/Criterion/figures/A_vs_B (one folder per contrast), gsea/figures/overview.
+QC figures: intensities, contaminants, correlation, pca, pca_pairs, cv. DE figures: counts, volcano/A_vs_B (one folder per contrast), top_hits, pvalues. Enrichment figures: gsea/figures/A_vs_B and ora/Criterion/figures/A_vs_B (one folder per contrast, both drawn by scripts/figures/enrichment.R; only enriched sets are shown, and a note says so when there are none), gsea/figures/overview.
 
 - data.tsv (+ samples.tsv / contrast.tsv for some plots): exactly what is plotted, opens in Excel
 - plot.R: a short ggplot/pheatmap script with settings at the top (size, font size, colours, labels; for volcanos, genes to always label in HIGHLIGHT)

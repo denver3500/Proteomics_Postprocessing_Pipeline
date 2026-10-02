@@ -14,11 +14,10 @@ knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
 options(knitr.kable.NA = "")
 source("scripts/common.R")
 
-qc         <- snakemake@input$qc
-figures    <- file.path(qc, "figures")
-overview   <- read_tsv(file.path(qc, "overview.tsv"), show_col_types = FALSE)
-samples    <- read_tsv(file.path(qc, "sample_metrics.tsv"), show_col_types = FALSE)
-conditions <- read_tsv(file.path(qc, "condition_metrics.tsv"), show_col_types = FALSE)
+figures    <- snakemake@input$figures
+overview   <- read_tsv(snakemake@input$overview, show_col_types = FALSE)
+samples    <- read_tsv(snakemake@input$sample_metrics, show_col_types = FALSE)
+conditions <- read_tsv(snakemake@input$condition_metrics, show_col_types = FALSE)
 
 complete <- overview$value[overview$item == "Proteins in every sample"]
 has_figure <- \(name) dir.exists(file.path(figures, name))

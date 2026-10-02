@@ -85,13 +85,11 @@ pca_scores <- function(x) {
   tibble(sample = colnames(x), PC1 = pca$x[, 1], PC2 = pca$x[, 2], var1 = variance[1], var2 = variance[2])
 }
 
-out <- snakemake@output[[1]]
-dir.create(out)
-write_tsv(overview, file.path(out, "overview.tsv"))
-write_tsv(qc, file.path(out, "sample_metrics.tsv"), na = "")
-write_tsv(conditions, file.path(out, "condition_metrics.tsv"), na = "")
+write_tsv(overview, snakemake@output$overview)
+write_tsv(qc, snakemake@output$sample_metrics, na = "")
+write_tsv(conditions, snakemake@output$condition_metrics, na = "")
 
-figures <- file.path(out, "figures")
+figures <- snakemake@output$figures
 sample_conditions <- select(samples, sample, condition)
 
 make_figure(file.path(figures, "intensities"), data = select(proteins, protein_id, all_of(samples$sample)), samples = sample_conditions)

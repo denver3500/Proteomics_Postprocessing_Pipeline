@@ -1,5 +1,6 @@
 # GSEA across contrasts: NES of the gene sets enriched in at least one contrast (red = higher in the first condition).
-# A dot marks the contrasts where the set is enriched. Sets with similar patterns are placed next to each other.
+# A dot marks the contrasts where the set is enriched up or down, a ring where it is mixed (enriched only by |t|, so
+# its proteins go both ways and its NES stays near 0). Sets with similar patterns are placed next to each other.
 # data.tsv: one row per gene set and contrast. Edit the settings, then run in this folder: Rscript plot.R
 suppressPackageStartupMessages(library(tidyverse))
 
@@ -11,7 +12,7 @@ N_SETS    <- 30    # sets with the smallest padj in any contrast
 MAX_LABEL <- 60    # longer set names are shortened
 DPI       <- 300   # PNG resolution
 
-data <- read_tsv("data.tsv", show_col_types = FALSE)
+data <- read_tsv("data.tsv", show_col_types = FALSE, col_types = cols(call = "c"))
 
 top <- data |>
   summarise(padj = min(padj, na.rm = TRUE), .by = label) |>
@@ -30,10 +31,11 @@ limit <- max(abs(shown$NES), na.rm = TRUE)
 
 plot <- ggplot(shown, aes(contrast, label, fill = NES)) +
   geom_tile(colour = "white") +
-  geom_point(data = filter(shown, enriched), size = 0.8) +
+  geom_point(aes(shape = call), data = filter(shown, !is.na(call)), size = 1.4) +
+  scale_shape_manual(values = c(up = 16, down = 16, mixed = 1), guide = "none") +
   scale_fill_gradient2(low = GRADIENT[1], mid = GRADIENT[2], high = GRADIENT[3], limits = c(-limit, limit)) +
   scale_y_discrete(labels = \(label) str_trunc(label, MAX_LABEL)) +
-  labs(x = NULL, y = NULL, caption = "dot = enriched in that contrast") +
+  labs(x = NULL, y = NULL, caption = "dot = enriched in that contrast, ring = mixed (proteins going both ways)") +
   theme_minimal(BASE_SIZE) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1), panel.grid = element_blank())
 

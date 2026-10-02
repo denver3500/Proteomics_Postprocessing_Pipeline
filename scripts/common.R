@@ -103,7 +103,7 @@ msigdb_source <- function(msigdb, species) {
   list(
     db = db,
     code = msigdb[[db]],
-    note = str_glue("MSigDB {msigdb[[db]]} (msigdbr {packageVersion('msigdbr')})",
+    note = str_glue("MSigDB `{msigdb[[db]]}` (msigdbr {packageVersion('msigdbr')})",
                     if (db != species$db) ", human sets mapped to {species$name} orthologs" else "")
   )
 }
@@ -125,9 +125,23 @@ make_figure <- function(folder, ..., script = basename(folder)) {
   invisible(folder)
 }
 
-# Markdown image of a figure folder's PNG for the reports, shown at 72 px per inch like plots drawn by knitr
-figure_image <- function(...) {
+# Enriched sets of one contrast (columns panel, label, padj, n_up, n_down, note), shared by GSEA and ORA; message is
+# drawn instead when no set is enriched
+enrichment_figure <- function(folder, sets, samples, contrast, method, subtitle, message) {
+  pair   <- condition_pairs(samples)[[contrast]]
+  labels <- condition_labels(samples)
+  make_figure(
+    folder, script = "enrichment",
+    data = sets,
+    contrast = tibble(contrast, method, title = contrast_labels(samples)[[contrast]], subtitle,
+                      higher_up = labels[[pair[1]]], higher_down = labels[[pair[2]]], message)
+  )
+}
+
+# Markdown image of a figure folder's PNG for the reports, shown at 72 px per inch like plots drawn by knitr.
+# ext = "svg" embeds the SVG instead: far smaller for plots with few shapes (bars, tiles), large for scatter plots
+figure_image <- function(..., ext = "png") {
   path <- normalizePath(list.files(file.path(...), "\\.png$", full.names = TRUE))
   info <- attr(png::readPNG(path, info = TRUE), "info")
-  str_glue("![]({path}){{width={round(info$dim[1] * 72 / info$dpi[1])}px}}")
+  str_glue("![]({str_replace(path, 'png$', ext)}){{width={round(info$dim[1] * 72 / info$dpi[1])}px}}")
 }

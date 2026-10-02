@@ -102,8 +102,8 @@ for d in APPROVED:
 # Plot scripts behind each step's figure folders (scripts/figures/<name>.R); editing one redraws it for every dataset
 QC_FIGURES = ["intensities", "contaminants", "correlation", "pca", "pca_pairs", "cv"]
 DE_FIGURES = ["counts", "volcano", "top_hits", "pvalues"]
-GSEA_FIGURES = ["gsea", "gsea_overview"]
-ORA_FIGURES = ["ora"]
+GSEA_FIGURES = ["enrichment", "gsea_overview"]
+ORA_FIGURES = ["enrichment"]
 
 wildcard_constraints:
     dataset="[^/]+",
@@ -115,10 +115,10 @@ rule all:
     input:
         expand("results/{dataset}/samples_draft.tsv", dataset=DATASETS),
         expand("results/{dataset}/{f}.tsv", dataset=APPROVED, f=["intensities", "samples"]),
-        expand("results/{dataset}/qc_report.html", dataset=APPROVED),
+        expand("results/{dataset}/qc/qc_report.html", dataset=APPROVED),
         expand("results/{dataset}/de/all_proteins", dataset=APPROVED),
         [f"results/{d}/de/{c}/{f}" for d in APPROVED for c in SIGNIFICANCE[d] for f in ["summary.tsv", "de_report.html"]],
-        [f"results/{d}/enrichment/{c}/{c}_report.html" for d in APPROVED for c in ENRICHMENT_RUNS[d]],
+        [f"results/{d}/enrichment/enrichment_report.html" for d in APPROVED if ENRICHMENT_RUNS[d]],
 
 
 rule draft_samples:
@@ -149,16 +149,22 @@ rule qc:
         samples="results/{dataset}/samples.tsv",
         figures=expand("scripts/figures/{name}.R", name=QC_FIGURES),
     output:
-        directory("results/{dataset}/qc"),
+        overview="results/{dataset}/qc/overview.tsv",
+        sample_metrics="results/{dataset}/qc/sample_metrics.tsv",
+        condition_metrics="results/{dataset}/qc/condition_metrics.tsv",
+        figures=directory("results/{dataset}/qc/figures"),
     script:
         "scripts/qc.R"
 
 
 rule qc_report:
     input:
-        qc="results/{dataset}/qc",
+        overview="results/{dataset}/qc/overview.tsv",
+        sample_metrics="results/{dataset}/qc/sample_metrics.tsv",
+        condition_metrics="results/{dataset}/qc/condition_metrics.tsv",
+        figures="results/{dataset}/qc/figures",
     output:
-        "results/{dataset}/qc_report.html",
+        "results/{dataset}/qc/qc_report.html",
     script:
         "scripts/qc_report.Rmd"
 
@@ -241,22 +247,21 @@ rule ora:
         "scripts/ora.R"
 
 
-def enrichment_runs(w, method):
-    return method in ENRICHMENT_RUNS[w.dataset][w.collection]
-
-
+# Every flagged collection of a dataset in one report; folders follow enrichment/<collection>/{gsea, ora/<criterion>}
 rule enrichment_report:
     input:
-        gene_sets="results/{dataset}/enrichment/{collection}/gene_sets.tsv",
         samples="results/{dataset}/samples.tsv",
         intensities="results/{dataset}/intensities.tsv",
-        gsea=lambda w: [f"results/{w.dataset}/enrichment/{w.collection}/gsea"] if enrichment_runs(w, "gsea") else [],
-        ora=lambda w: [f"results/{w.dataset}/enrichment/{w.collection}/ora/{c}"
-                       for c in SIGNIFICANCE[w.dataset]] if enrichment_runs(w, "ora") else [],
+        gene_sets=lambda w: [f"results/{w.dataset}/enrichment/{c}/gene_sets.tsv" for c in ENRICHMENT_RUNS[w.dataset]],
+        gsea=lambda w: [f"results/{w.dataset}/enrichment/{c}/gsea"
+                        for c, methods in ENRICHMENT_RUNS[w.dataset].items() if "gsea" in methods],
+        ora=lambda w: [f"results/{w.dataset}/enrichment/{c}/ora/{s}"
+                       for c, methods in ENRICHMENT_RUNS[w.dataset].items() if "ora" in methods
+                       for s in SIGNIFICANCE[w.dataset]],
     output:
-        "results/{dataset}/enrichment/{collection}/{collection}_report.html",
+        "results/{dataset}/enrichment/enrichment_report.html",
     params:
-        msigdb=lambda w: COLLECTIONS[w.collection],
+        msigdb=lambda w: {c: COLLECTIONS[c] for c in ENRICHMENT_RUNS[w.dataset]},
         criteria=lambda w: SIGNIFICANCE[w.dataset],
     script:
         "scripts/enrichment_report.Rmd"
