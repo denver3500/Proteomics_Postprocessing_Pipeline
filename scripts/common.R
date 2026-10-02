@@ -1,4 +1,4 @@
-# Shared helpers: read a facility table into a standard shape; contrasts, significance and volcano plots for DE
+# Shared helpers: read a facility table into a standard shape; contrasts and significance for DE; figure folders
 suppressPackageStartupMessages(library(tidyverse))
 
 # Raw annotation column -> clean name. Extend when a new table format arrives.
@@ -74,28 +74,28 @@ count_significant <- function(de) {
   )
 }
 
-DIRECTION_COLOURS <- c(up = "#B2182B", down = "#2166AC", ns = "grey75")
+# Constants the reports quote. QC flags: a sample is flagged when it stands out from the rest of the dataset
+OUTLIER_MADS     <- 3   # proteins, contaminants, replicate correlation: > 3 MADs worse than the median
+MAX_MEDIAN_SHIFT <- 1   # median intensity: > 1 log2 (2-fold) away from the typical sample
+N_TOP_HITS       <- 50  # proteins in the DE top-hits heatmap
 
-# Volcano of one contrast with up/down counts in the top corners; expects the direction column from call_significance()
-volcano_plot <- function(stats, criterion, title, n_labels = 10) {
-  labelled <- stats |> filter(direction != "ns") |> slice_min(pvalue, n = n_labels, with_ties = FALSE)
-  fc <- criterion$log2fc %||% 0
+# Figure folder, one per picture: tables (data.tsv, ...) + plot.R, a copy of scripts/figures/<script>.R, run in the
+# folder to draw the picture. The folder works on its own, so it can be copied anywhere and restyled
+make_figure <- function(folder, ..., script = basename(folder)) {
+  dir.create(folder, recursive = TRUE)
+  iwalk(list(...), \(table, file) {
+    table |>
+      mutate(across(where(is.double), \(x) signif(x, 6))) |>  # plenty for drawing; full statistics are in de/all_proteins
+      write_tsv(file.path(folder, str_c(file, ".tsv")), na = "")
+  })
+  file.copy(file.path("scripts/figures", str_c(script, ".R")), file.path(folder, "plot.R"))
+  source(file.path(folder, "plot.R"), local = new.env(), chdir = TRUE)
+  invisible(folder)
+}
 
-  # Significance starts at the largest p that still passes the p-value cutoffs (for padj this varies per contrast)
-  passing <- filter(stats, padj < (criterion$padj %||% Inf), pvalue < (criterion$pvalue %||% Inf))
-  p_line  <- if (nrow(passing)) geom_hline(yintercept = -log10(max(passing$pvalue)), linetype = "dashed", colour = "grey40")
-  fc_line <- if (fc > 0) geom_vline(xintercept = c(-fc, fc), linetype = "dashed", colour = "grey40")
-
-  ggplot(arrange(stats, direction != "ns"), aes(log2fc, -log10(pvalue), colour = direction)) +
-    geom_point(size = 0.8, alpha = 0.7) +
-    p_line +
-    fc_line +
-    ggrepel::geom_text_repel(aes(label = gene), data = labelled, size = 2.5, max.overlaps = Inf, show.legend = FALSE) +
-    annotate("label", x = -Inf, y = Inf, hjust = -0.1, vjust = 1.3, label = str_glue("{sum(stats$direction == 'down')} down"),
-             colour = DIRECTION_COLOURS[["down"]], fontface = "bold", label.size = 0) +
-    annotate("label", x = Inf, y = Inf, hjust = 1.1, vjust = 1.3, label = str_glue("{sum(stats$direction == 'up')} up"),
-             colour = DIRECTION_COLOURS[["up"]], fontface = "bold", label.size = 0) +
-    scale_colour_manual(values = DIRECTION_COLOURS, breaks = c("up", "down"), guide = "none") +
-    scale_y_continuous(expand = expansion(mult = c(0.02, 0.12))) +
-    labs(title = title, x = "log2 fold change", y = "-log10 p-value")
+# Markdown image of a figure folder's PNG for the reports, shown at 72 px per inch like plots drawn by knitr
+figure_image <- function(...) {
+  path <- normalizePath(list.files(file.path(...), "\\.png$", full.names = TRUE))
+  info <- attr(png::readPNG(path, info = TRUE), "info")
+  str_glue("![]({path}){{width={round(info$dim[1] * 72 / info$dpi[1])}px}}")
 }

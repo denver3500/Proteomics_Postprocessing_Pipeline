@@ -9,108 +9,19 @@ params:
 ---
 
 ```{r setup, include = FALSE}
-# Clean intensities + sample sheet (+ raw table for contaminants) -> one QC report
-knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, fig.width = 9)
+# QC tables and figures (scripts/qc.R) -> one QC report
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+options(knitr.kable.NA = "")
 source("scripts/common.R")
 
-# A sample is flagged when it stands out from the rest of the dataset
-OUTLIER_MADS     <- 3  # proteins, contaminants, replicate correlation: > 3 MADs worse than the median
-MAX_MEDIAN_SHIFT <- 1  # median intensity: > 1 log2 (2-fold) away from the typical sample
+qc         <- snakemake@input$qc
+figures    <- file.path(qc, "figures")
+overview   <- read_tsv(file.path(qc, "overview.tsv"), show_col_types = FALSE)
+samples    <- read_tsv(file.path(qc, "sample_metrics.tsv"), show_col_types = FALSE)
+conditions <- read_tsv(file.path(qc, "condition_metrics.tsv"), show_col_types = FALSE)
 
-# side = +1: high values are bad; side = -1: low values are bad
-is_outlier <- function(x, side) side * (x - median(x, na.rm = TRUE)) > OUTLIER_MADS * mad(x, na.rm = TRUE)
-
-samples  <- read_tsv(snakemake@input$samples, show_col_types = FALSE) |>
-  mutate(condition = fct_inorder(label))  # readable labels (one per condition), in sample-sheet order
-proteins <- read_tsv(snakemake@input$intensities, show_col_types = FALSE)
-raw      <- read_table(snakemake@input$table)
-sheet    <- read_tsv(snakemake@input$sheet, col_types = cols(.default = "c"))
-
-log2i <- as.matrix(proteins[samples$sample])  # log2 intensities, proteins x samples
-
-# Contaminants: share of each sample's total intensity that comes from cRAP proteins
-crap <- str_starts(raw$protein_id, "cRAP-")
-raw_linear <- 2^as.matrix(raw[samples$column])
-contaminants <- colSums(raw_linear[crap, , drop = FALSE], na.rm = TRUE) / colSums(raw_linear, na.rm = TRUE)
-
-# Sample-to-sample correlation; `others` blanks the diagonal so a sample is not compared to itself
-cors <- cor(log2i, use = "pairwise.complete.obs")
-others <- cors
-diag(others) <- NA
-replicate_cors <- ifelse(outer(samples$condition, samples$condition, "=="), others, NA)
-
-# Extreme low values (below the dataset's lower boxplot whisker) usually mark imputed, i.e. undetected, proteins
-quartiles <- quantile(log2i, c(0.25, 0.75), na.rm = TRUE)
-low_cutoff <- quartiles[[1]] - 1.5 * diff(quartiles)
-
-qc <- samples |>
-  select(sample, condition, replicate) |>
-  mutate(
-    quantified       = colSums(!is.na(log2i)),
-    missing_pct      = 100 * colMeans(is.na(log2i)),
-    low_values_pct   = 100 * colMeans(log2i < low_cutoff, na.rm = TRUE),
-    contaminants_pct = 100 * contaminants,
-    median_shift     = apply(log2i - apply(log2i, 1, median, na.rm = TRUE), 2, median, na.rm = TRUE),
-    cor_within       = apply(replicate_cors, 2, median, na.rm = TRUE),
-    cor_all          = apply(others, 2, median, na.rm = TRUE),
-    flags = str_c(
-      if_else(is_outlier(quantified, -1), "few proteins; ", "", missing = ""),
-      if_else(is_outlier(contaminants_pct, +1), "high contaminants; ", "", missing = ""),
-      if_else(abs(median_shift) > MAX_MEDIAN_SHIFT, "intensity shift; ", "", missing = ""),
-      if_else(is_outlier(cor_within, -1), "low replicate correlation; ", "", missing = "")
-    ) |> str_remove("; $")
-  )
-
-# Long table (one row per protein x sample) for per-condition CVs and plots
-long <- proteins |>
-  select(protein_id, all_of(samples$sample)) |>
-  pivot_longer(-protein_id, names_to = "sample", values_to = "log2") |>
-  left_join(select(samples, sample, condition), by = "sample") |>
-  mutate(sample = fct_inorder(sample))
-
-cv <- long |>
-  summarise(cv = 100 * sd(2^log2, na.rm = TRUE) / mean(2^log2, na.rm = TRUE), .by = c(condition, protein_id))
-
-conditions <- qc |>
-  summarise(replicates = n(), median_cor_within = median(cor_within), .by = condition) |>
-  left_join(summarise(cv, median_cv_pct = median(cv, na.rm = TRUE), .by = condition), by = "condition")
-
-# Dataset summary
-contaminant_names <- str_remove(if ("protein_name" %in% names(raw)) raw$protein_name else raw$protein_id, "^cRAP-")
-top_contaminants <- contaminant_names[crap][order(-rowSums(raw_linear[crap, , drop = FALSE], na.rm = TRUE))]
-excluded <- sheet |> filter(if_any(any_of("exclude"), \(x) !is.na(x)))
-
-overview <- tribble(
-  ~item, ~value,
-  "Dataset", snakemake@wildcards$dataset,
-  "Samples", str_glue("{nrow(samples)} in {n_distinct(samples$condition)} conditions"),
-  "Proteins", as.character(nrow(proteins)),
-  "Missing values", str_glue("{round(100 * mean(is.na(log2i)), 1)}%"),
-  "Single-peptide proteins", if ("n_sequences" %in% names(proteins)) {
-    str_glue("{round(100 * mean(proteins$n_sequences == 1, na.rm = TRUE), 1)}%")
-  } else "not available",
-  "Ambiguous protein groups", as.character(sum(str_detect(proteins$protein_id, ";"))),
-  "Contaminants removed", str_glue("{sum(crap)} cRAP proteins (top: {str_flatten_comma(head(top_contaminants, 5))})"),
-  "Excluded samples", if (nrow(excluded)) str_flatten_comma(str_glue("{excluded$column} ({excluded$exclude})")) else "none",
-  "Flagged samples", str_glue("{sum(qc$flags != '')} of {nrow(qc)}")
-)
-
-# PCA on the proteins measured in every sample of x: PC1/PC2 per sample + % variance of each
-pca_scores <- function(x) {
-  pca <- prcomp(t(x[complete.cases(x), , drop = FALSE]))
-  variance <- round(100 * pca$sdev^2 / sum(pca$sdev^2), 1)
-  tibble(sample = colnames(x), PC1 = pca$x[, 1], PC2 = pca$x[, 2], var1 = variance[1], var2 = variance[2])
-}
-complete <- log2i[complete.cases(log2i), , drop = FALSE]
-n_pairs <- choose(nlevels(samples$condition), 2)
-
-# Same colour per condition in every plot (ggplot's default palette)
-condition_colours <- set_names(scales::hue_pal()(nlevels(samples$condition)), levels(samples$condition))
-
-# Plot heights grow with the number of samples / conditions / condition pairs
-sample_height    <- max(4, 0.18 * nrow(samples))
-condition_height <- max(2.5, 0.45 * nrow(conditions))
-pair_height      <- 3 * ceiling(n_pairs / 3)
+complete <- overview$value[overview$item == "Proteins in every sample"]
+has_figure <- \(name) dir.exists(file.path(figures, name))
 ```
 
 ## Summary
@@ -119,12 +30,12 @@ pair_height      <- 3 * ceiling(n_pairs / 3)
 knitr::kable(overview, col.names = NULL)
 ```
 
-`r if (!anyNA(log2i)) "No missing values: the table was most likely imputed by the facility, so completeness says nothing about data quality here. Look at low_values_pct instead: imputed values usually land in the extreme low tail."`
+`r if (all(samples$missing_pct == 0)) "No missing values: the table was most likely imputed by the facility, so completeness says nothing about data quality here. Look at low_values_pct instead: imputed values usually land in the extreme low tail."`
 
 ## Samples
 
 ```{r}
-knitr::kable(qc, digits = 3)
+knitr::kable(samples, digits = 3)
 ```
 
 ## Conditions
@@ -134,97 +45,38 @@ knitr::kable(conditions, digits = 3)
 ```
 
 ## Plots
+Each plot is also in `qc/figures/<plot>/` next to this report, with its data and a script to restyle it.
 
 ### Intensity distributions
 Boxes should sit at similar heights; a shifted box means a loading or normalization problem.
 
-```{r, fig.height = sample_height}
-ggplot(long, aes(log2, fct_rev(sample), fill = condition)) +
-  geom_boxplot(outlier.size = 0.3, na.rm = TRUE) +
-  labs(x = "log2 intensity", y = NULL)
-```
+`r figure_image(figures, "intensities")`
 
 ### Contaminants
 Dashed line = dataset median.
 
-```{r, fig.height = sample_height}
-ggplot(qc, aes(contaminants_pct, fct_rev(fct_inorder(sample)), fill = condition)) +
-  geom_col() +
-  geom_vline(xintercept = median(qc$contaminants_pct), linetype = "dashed") +
-  labs(x = "% of total intensity from cRAP contaminants", y = NULL)
-```
+`r figure_image(figures, "contaminants")`
 
 ### Sample correlation
 Samples are ordered by similarity (hierarchical clustering on 1 − Pearson r), and the tree shows which samples group together. The colour bar marks each sample's condition: replicates of one condition should end up next to each other.
 
-```{r, fig.height = sample_height + 1.5}
-annotation <- data.frame(condition = samples$condition, row.names = samples$sample)
-distance <- as.dist(1 - cors)
-
-pheatmap::pheatmap(
-  cors,
-  color = hcl.colors(100, "viridis"),
-  clustering_distance_rows = distance,
-  clustering_distance_cols = distance,
-  clustering_method = "average",
-  annotation_row = annotation,
-  annotation_col = annotation,
-  annotation_colors = list(condition = condition_colours),
-  annotation_names_row = FALSE,
-  annotation_names_col = FALSE,
-  border_color = NA,
-  fontsize = 7
-)
-```
+`r figure_image(figures, "correlation")`
 
 ### PCA
-Replicates should cluster by condition. Flagged samples are labelled with their replicate number. Based on `r nrow(complete)` proteins measured in every sample.
+Replicates should cluster by condition. Flagged samples are labelled with their replicate number. Based on `r complete` proteins measured in every sample.
 
-```{r, fig.height = 6, eval = nrow(complete) >= 2}
-pca <- pca_scores(log2i)
-
-qc |>
-  left_join(pca, by = "sample") |>
-  ggplot(aes(PC1, PC2, colour = condition)) +
-  geom_point(size = 2.5) +
-  geom_text(aes(label = if_else(flags == "", "", str_c("R", replicate))), size = 3, vjust = -0.9, show.legend = FALSE) +
-  scale_colour_manual(values = condition_colours) +
-  scale_x_continuous(expand = expansion(mult = 0.1)) +
-  labs(x = str_glue("PC1 ({pca$var1[1]}%)"), y = str_glue("PC2 ({pca$var2[1]}%)"))
-```
+`r if (has_figure("pca")) figure_image(figures, "pca")`
 
 ### PCA per pair of conditions
 Each panel is a separate PCA of just two conditions, so a group that dominates the PCA above cannot hide their differences. Separation along PC1 means the two conditions differ more than their replicates do. Points are labelled with replicate numbers.
-`r if (n_pairs < 2) "Not shown: with two conditions this is the same as the PCA above."`
+`r if (!has_figure("pca_pairs")) "Not shown: with two conditions this is the same as the PCA above."`
 
-```{r, fig.height = pair_height, eval = n_pairs >= 2}
-combn(levels(samples$condition), 2, simplify = FALSE) |>
-  map(\(pair) {
-    pca_scores(log2i[, samples$condition %in% pair, drop = FALSE]) |>
-      mutate(pair = str_glue("{pair[1]} vs {pair[2]}\nPC1 {var1}%, PC2 {var2}%"))
-  }) |>
-  list_rbind() |>
-  left_join(select(samples, sample, condition, replicate), by = "sample") |>
-  mutate(pair = fct_inorder(pair)) |>
-  ggplot(aes(PC1, PC2, colour = condition)) +
-  geom_point(size = 1.8) +
-  geom_text(aes(label = str_c("R", replicate)), size = 2.5, vjust = -0.8, show.legend = FALSE) +
-  facet_wrap(vars(pair), scales = "free", ncol = 3) +
-  scale_colour_manual(values = condition_colours) +
-  scale_x_continuous(expand = expansion(mult = 0.15)) +
-  scale_y_continuous(expand = expansion(mult = 0.15)) +
-  theme(legend.position = "top", axis.text = element_text(size = 6))
-```
+`r if (has_figure("pca_pairs")) figure_image(figures, "pca_pairs")`
 
 ### Reproducibility within conditions
 Coefficient of variation of each protein across the replicates of a condition (lower = more reproducible).
 
-```{r, fig.height = condition_height}
-ggplot(cv, aes(cv, fct_rev(condition), fill = condition)) +
-  geom_boxplot(outlier.shape = NA, na.rm = TRUE, show.legend = FALSE) +
-  coord_cartesian(xlim = c(0, 100)) +
-  labs(x = "CV % per protein", y = NULL)
-```
+`r figure_image(figures, "cv")`
 
 ## How to read this
 

@@ -15,7 +15,7 @@ We take counts data (proteinLevelData.tsv and pivot_pack.tsv) and try to deduce 
 
 III. Step 2 - QC
 
-For every approved dataset we write one report: results/Dataset/qc_report.html 
+For every approved dataset we write one report, results/Dataset/qc_report.html, and its tables and figures in results/Dataset/qc/ (overview.tsv, sample_metrics.tsv, condition_metrics.tsv, figures/).
 
 The label column of samples.tsv is the readable name of a condition, shown in every report and plot (e.g. "M0 TRAP1 KO, DMEM" instead of M0_KO_DMEM). Use one label per condition; if empty, the condition with spaces instead of underscores is used. Files and folders always use the condition itself.
 
@@ -43,5 +43,26 @@ Output, results/Dataset/de/:
 - all_proteins/A_vs_B.tsv: statistics for every protein
 - Criterion/summary.tsv: up and down counts per contrast
 - Criterion/significant/A_vs_B.tsv: significant proteins only
-- Criterion/volcano/A_vs_B.pdf: volcano plot
-- Criterion/de_report.html: counts, volcano plots, top-hit heatmap, p-value histograms
+- Criterion/figures/: counts, volcano/A_vs_B (one folder per contrast), top-hit heatmap, p-value histograms (see V. Figures)
+- Criterion/de_report.html: counts and all figures in one page
+
+V. Figures
+
+Every picture in the reports has its own folder with its data and script, so it can be restyled without rerunning the pipeline:
+
+```
+results/Dataset/qc/figures/pca/                          data.tsv  plot.R  pca.svg  pca.png
+results/Dataset/de/Criterion/figures/volcano/A_vs_B/     data.tsv  contrast.tsv  plot.R  volcano_A_vs_B.svg  volcano_A_vs_B.png
+```
+
+QC figures: intensities, contaminants, correlation, pca, pca_pairs, cv. DE figures: counts, volcano/A_vs_B (one folder per contrast), top_hits, pvalues.
+
+- data.tsv (+ samples.tsv / contrast.tsv for some plots): exactly what is plotted, opens in Excel
+- plot.R: a short ggplot/pheatmap script with settings at the top (size, font size, colours, labels; for volcanos, genes to always label in HIGHLIGHT)
+- .svg for papers and editing in Inkscape/Illustrator, .png for slides
+
+To make a version for a talk or a paper, copy the folder anywhere (results/ is overwritten on reruns), edit the settings in plot.R and run it inside the folder:
+
+  conda run -n proteomics Rscript --vanilla plot.R    (--vanilla keeps packages from a personal R library out)
+
+To change the default look for every dataset, edit the master script in scripts/figures/ (e.g. scripts/figures/volcano.R) and run the pipeline again: only the figures and reports that use that script are redrawn.

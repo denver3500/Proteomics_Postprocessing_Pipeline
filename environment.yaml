@@ -11,3 +11,5 @@ dependencies:
   - r-pheatmap =1.0.13
   - bioconductor-limma =3.66
   - r-ggrepel =0.9.8
+  - r-svglite =2.2.2
+  - r-png =0.1_9

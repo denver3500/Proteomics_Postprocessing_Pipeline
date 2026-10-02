@@ -56,6 +56,10 @@ for d in APPROVED:
         logger.warning(f"NO SIGNIFICANCE CRITERIA {d}: add Input/{d}/{CRITERIA} (see README) "
                        f"to get significant-protein lists; only results/{d}/de/all_proteins is built.")
 
+# Plot scripts behind each step's figure folders (scripts/figures/<name>.R); editing one redraws it for every dataset
+QC_FIGURES = ["intensities", "contaminants", "correlation", "pca", "pca_pairs", "cv"]
+DE_FIGURES = ["counts", "volcano", "top_hits", "pvalues"]
+
 wildcard_constraints:
     dataset="[^/]+",
     criterion="[^/]+",
@@ -90,12 +94,22 @@ rule clean_table:
         "scripts/clean_table.R"
 
 
-rule qc_report:
+rule qc:
     input:
         table=lambda w: DATASETS[w.dataset],
         sheet=f"Input/{{dataset}}/{SHEET}",
         intensities="results/{dataset}/intensities.tsv",
         samples="results/{dataset}/samples.tsv",
+        figures=expand("scripts/figures/{name}.R", name=QC_FIGURES),
+    output:
+        directory("results/{dataset}/qc"),
+    script:
+        "scripts/qc.R"
+
+
+rule qc_report:
+    input:
+        qc="results/{dataset}/qc",
     output:
         "results/{dataset}/qc_report.html",
     script:
@@ -117,10 +131,12 @@ rule de_significance:
     input:
         stats="results/{dataset}/de/all_proteins",
         samples="results/{dataset}/samples.tsv",
+        intensities="results/{dataset}/intensities.tsv",
+        figures=expand("scripts/figures/{name}.R", name=DE_FIGURES),
     output:
         summary="results/{dataset}/de/{criterion}/summary.tsv",
         significant=directory("results/{dataset}/de/{criterion}/significant"),
-        volcano=directory("results/{dataset}/de/{criterion}/volcano"),
+        figures=directory("results/{dataset}/de/{criterion}/figures"),
     params:
         criterion=lambda w: SIGNIFICANCE[w.dataset][w.criterion],
     script:
@@ -129,10 +145,10 @@ rule de_significance:
 
 rule de_report:
     input:
-        stats="results/{dataset}/de/all_proteins",
+        summary="results/{dataset}/de/{criterion}/summary.tsv",
+        significant="results/{dataset}/de/{criterion}/significant",
+        figures="results/{dataset}/de/{criterion}/figures",
         model="results/{dataset}/de/model.tsv",
-        intensities="results/{dataset}/intensities.tsv",
-        samples="results/{dataset}/samples.tsv",
     output:
         "results/{dataset}/de/{criterion}/de_report.html",
     params:

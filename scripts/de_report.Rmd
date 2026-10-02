@@ -10,44 +10,28 @@ params:
 ---
 
 ```{r setup, include = FALSE}
-# limma statistics + one significance criterion (+ intensities for the heatmap) -> one DE report
-knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, fig.width = 9)
+# Significance results and DE figures (scripts/de_significance.R) + model summary -> one DE report
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
 source("scripts/common.R")
 
 criterion <- snakemake@params$criterion
-samples   <- read_tsv(snakemake@input$samples, show_col_types = FALSE)
-proteins  <- read_tsv(snakemake@input$intensities, show_col_types = FALSE)
+figures   <- snakemake@input$figures
+counts    <- read_tsv(snakemake@input$summary, show_col_types = FALSE)
 model     <- read_tsv(snakemake@input$model, show_col_types = FALSE)
-pairs     <- condition_pairs(samples)
-labels    <- condition_labels(samples)
-titles    <- contrast_labels(samples)
-de        <- read_de(snakemake@input$stats, samples) |> map(\(x) call_significance(x, criterion))
-counts    <- count_significant(de) |> mutate(label = titles[contrast], .before = 1)
 
-significant <- de |>
-  map(\(x) filter(x, direction != "ns")) |>
+significant <- list.files(snakemake@input$significant, "\\.tsv$", full.names = TRUE) |>
+  map(\(f) read_tsv(f, col_select = protein_id, col_types = cols(.default = "c"))) |>
   list_rbind()
+n_significant <- n_distinct(significant$protein_id)
+n_top <- min(N_TOP_HITS, n_significant)
 
 overview <- tribble(
   ~item, ~value,
   "Dataset", snakemake@wildcards$dataset,
   "Significant if", describe_criterion(criterion),
-  "Significant in any contrast", str_glue("{n_distinct(significant$protein_id)} proteins")
+  "Significant in any contrast", str_glue("{n_significant} proteins")
 ) |>
   bind_rows(model)
-
-# Top hits: the 50 significant proteins with the smallest p-value in any contrast
-top_ids <- significant |>
-  summarise(pvalue = min(pvalue), .by = protein_id) |>
-  slice_min(pvalue, n = 50, with_ties = FALSE) |>
-  pull(protein_id)
-
-conditions <- fct_inorder(labels[samples$condition])
-condition_colours <- set_names(scales::hue_pal()(nlevels(conditions)), levels(conditions))
-
-contrast_height <- max(2.5, 0.3 * length(de))
-pvalue_height   <- max(2.5, 1.8 * ceiling(length(de) / 4))
-heatmap_height  <- max(4, 0.14 * length(top_ids) + 2)
 ```
 
 ## Summary
@@ -57,71 +41,30 @@ knitr::kable(overview, col.names = NULL)
 ```
 
 ```{r}
-knitr::kable(counts, col.names = c("contrast", "file name", "up", "down", "total"))
+knitr::kable(select(counts, label, contrast, up, down, total), col.names = c("contrast", "file name", "up", "down", "total"))
 ```
 
-```{r, fig.height = contrast_height}
-counts |>
-  pivot_longer(c(up, down), names_to = "direction", values_to = "n") |>
-  mutate(signed = if_else(direction == "down", -n, n), label = fct_rev(fct_inorder(label))) |>
-  ggplot(aes(signed, label, fill = direction)) +
-  geom_col() +
-  geom_text(aes(label = n, hjust = if_else(direction == "down", 1.15, -0.15)), size = 3) +
-  geom_vline(xintercept = 0) +
-  scale_fill_manual(values = DIRECTION_COLOURS) +
-  scale_x_continuous(labels = abs, expand = expansion(mult = 0.12)) +
-  labs(x = "significant proteins (down | up)", y = NULL, fill = NULL)
-```
+`r figure_image(figures, "counts")`
 
 ## Volcano plots {.tabset .tabset-dropdown}
 Pick a contrast. Dashed lines mark the significance cutoffs; the most significant proteins are labelled.
 
-```{r, results = "asis", fig.height = 5.5}
-for (name in names(de)) {
-  cat("\n\n### ", titles[[name]], "\n\n", sep = "")
-  print(volcano_plot(de[[name]], criterion, titles[[name]]) +
-          labs(subtitle = str_glue("up = higher in {labels[[pairs[[name]][1]]]}")))
+```{r, results = "asis"}
+for (i in seq_len(nrow(counts))) {
+  cat("\n\n### ", counts$label[i], "\n\n", figure_image(figures, "volcano", counts$contrast[i]), "\n", sep = "")
 }
 ```
 
 ## Top hits
-Intensities of the `r length(top_ids)` most significant proteins, z-scored per protein (red = above the protein's mean across samples). Samples are grouped by condition.
-`r if (length(top_ids) < 2) "Not shown: fewer than two significant proteins."`
+Intensities of the `r n_top` most significant proteins, z-scored per protein (red = above the protein's mean across samples). Samples are grouped by condition.
+`r if (n_top < 2) "Not shown: fewer than two significant proteins."`
 
-```{r, fig.height = heatmap_height, eval = length(top_ids) >= 2}
-top <- proteins |> filter(protein_id %in% top_ids)
-heatmap <- as.matrix(top[samples$sample])
-rownames(heatmap) <- make.unique(top$gene)
-
-pheatmap::pheatmap(
-  heatmap,
-  scale = "row",
-  color = colorRampPalette(c("#2166AC", "white", "#B2182B"))(100),
-  cluster_cols = FALSE,
-  gaps_col = head(cumsum(rle(samples$condition)$lengths), -1),
-  annotation_col = data.frame(condition = conditions, row.names = samples$sample),
-  annotation_colors = list(condition = condition_colours),
-  annotation_names_col = FALSE,
-  show_colnames = FALSE,
-  border_color = NA,
-  fontsize = 7
-)
-```
+`r if (n_top >= 2) figure_image(figures, "top_hits")`
 
 ## p-value distributions
 A healthy contrast shows a flat histogram with a peak near 0 (the real differences). A hump in the middle or near 1 points to a problem with the model, such as an unaccounted batch or pairing.
 
-```{r, fig.height = pvalue_height}
-de |>
-  map(\(x) select(x, pvalue)) |>
-  list_rbind(names_to = "contrast") |>
-  mutate(contrast = fct_inorder(titles[contrast])) |>
-  ggplot(aes(pvalue)) +
-  geom_histogram(breaks = seq(0, 1, 0.05), fill = "grey50") +
-  facet_wrap(vars(contrast), ncol = 4, scales = "free_y") +
-  theme(strip.text = element_text(size = 7)) +
-  labs(x = "p-value", y = "proteins")
-```
+`r figure_image(figures, "pvalues")`
 
 ## How to read this
 
@@ -130,3 +73,4 @@ de |>
 - **Statistics**: one limma model for all conditions, so every contrast borrows variance information from all samples.
 - **Paired samples**: when `samples.tsv` has a `block` column, samples with the same value (e.g. the same mouse) are treated as related, which removes subject-to-subject differences from the comparisons.
 - **Tables**: all proteins with statistics in `de/all_proteins/`, significant ones in `de/<criterion>/significant/`.
+- **Figures**: each plot is also in its own folder with its data and a script to restyle it: `de/<criterion>/figures/<plot>/`, volcano plots in `figures/volcano/<A_vs_B>/`.
