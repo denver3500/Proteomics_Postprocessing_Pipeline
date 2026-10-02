@@ -19,8 +19,10 @@ samples   <- read_tsv(snakemake@input$samples, show_col_types = FALSE)
 proteins  <- read_tsv(snakemake@input$intensities, show_col_types = FALSE)
 model     <- read_tsv(snakemake@input$model, show_col_types = FALSE)
 pairs     <- condition_pairs(samples)
+labels    <- condition_labels(samples)
+titles    <- contrast_labels(samples)
 de        <- read_de(snakemake@input$stats, samples) |> map(\(x) call_significance(x, criterion))
-counts    <- count_significant(de)
+counts    <- count_significant(de) |> mutate(label = titles[contrast], .before = 1)
 
 significant <- de |>
   map(\(x) filter(x, direction != "ns")) |>
@@ -40,7 +42,7 @@ top_ids <- significant |>
   slice_min(pvalue, n = 50, with_ties = FALSE) |>
   pull(protein_id)
 
-conditions <- fct_inorder(samples$condition)
+conditions <- fct_inorder(labels[samples$condition])
 condition_colours <- set_names(scales::hue_pal()(nlevels(conditions)), levels(conditions))
 
 contrast_height <- max(2.5, 0.3 * length(de))
@@ -55,18 +57,19 @@ knitr::kable(overview, col.names = NULL)
 ```
 
 ```{r}
-knitr::kable(counts)
+knitr::kable(counts, col.names = c("contrast", "file name", "up", "down", "total"))
 ```
 
 ```{r, fig.height = contrast_height}
 counts |>
   pivot_longer(c(up, down), names_to = "direction", values_to = "n") |>
-  mutate(n = if_else(direction == "down", -n, n), contrast = fct_rev(fct_inorder(contrast))) |>
-  ggplot(aes(n, contrast, fill = direction)) +
+  mutate(signed = if_else(direction == "down", -n, n), label = fct_rev(fct_inorder(label))) |>
+  ggplot(aes(signed, label, fill = direction)) +
   geom_col() +
+  geom_text(aes(label = n, hjust = if_else(direction == "down", 1.15, -0.15)), size = 3) +
   geom_vline(xintercept = 0) +
   scale_fill_manual(values = DIRECTION_COLOURS) +
-  scale_x_continuous(labels = abs) +
+  scale_x_continuous(labels = abs, expand = expansion(mult = 0.12)) +
   labs(x = "significant proteins (down | up)", y = NULL, fill = NULL)
 ```
 
@@ -75,8 +78,9 @@ Pick a contrast. Dashed lines mark the significance cutoffs; the most significan
 
 ```{r, results = "asis", fig.height = 5.5}
 for (name in names(de)) {
-  cat("\n\n### ", name, "\n\n", sep = "")
-  print(volcano_plot(de[[name]], criterion) + labs(subtitle = str_glue("up = higher in {pairs[[name]][1]}")))
+  cat("\n\n### ", titles[[name]], "\n\n", sep = "")
+  print(volcano_plot(de[[name]], criterion, titles[[name]]) +
+          labs(subtitle = str_glue("up = higher in {labels[[pairs[[name]][1]]]}")))
 }
 ```
 
@@ -111,7 +115,7 @@ A healthy contrast shows a flat histogram with a peak near 0 (the real differenc
 de |>
   map(\(x) select(x, pvalue)) |>
   list_rbind(names_to = "contrast") |>
-  mutate(contrast = fct_inorder(contrast)) |>
+  mutate(contrast = fct_inorder(titles[contrast])) |>
   ggplot(aes(pvalue)) +
   geom_histogram(breaks = seq(0, 1, 0.05), fill = "grey50") +
   facet_wrap(vars(contrast), ncol = 4, scales = "free_y") +
@@ -121,7 +125,7 @@ de |>
 
 ## How to read this
 
-- **A_vs_B**: positive log2FC means higher in A. A is the condition listed first in `samples.tsv`; to flip a comparison, reorder the rows of `Input/<dataset>/samples.tsv`.
+- **A vs B**: positive log2FC means higher in A. A is the condition listed first in `samples.tsv`; to flip a comparison, reorder the rows of `Input/<dataset>/samples.tsv`. Names shown here come from its `label` column; files are named by condition (A_vs_B).
 - **Significant**: `r describe_criterion(criterion)`. padj is the Benjamini-Hochberg adjusted p-value within each contrast.
 - **Statistics**: one limma model for all conditions, so every contrast borrows variance information from all samples.
 - **Paired samples**: when `samples.tsv` has a `block` column, samples with the same value (e.g. the same mouse) are treated as related, which removes subject-to-subject differences from the comparisons.

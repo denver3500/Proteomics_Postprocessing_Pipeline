@@ -11,6 +11,7 @@ name <- str_sub(cols, nchar(prefix) + 1)
 draft <- tibble(
   column    = cols,
   condition = str_remove(name, "(_\\d+)?_R\\d+$"),
+  label     = default_label(condition),  # readable name for plots; edit freely
   replicate = as.integer(str_match(name, "_R(\\d+)$")[, 2]),
   exclude   = NA  # fill in a reason (e.g. "failed QC") to drop a sample
 ) |>

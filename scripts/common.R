@@ -25,10 +25,22 @@ sample_columns <- function(raw) {
     names()
 }
 
+# Readable condition name for plots and tables, used when the sample sheet has no label
+default_label <- function(condition) str_replace_all(condition, "_", " ")
+
+condition_labels <- function(samples) {
+  distinct(samples, condition, label) |> deframe()
+}
+
 # Every pair of conditions, named A_vs_B. A is listed first in the sample sheet, so log2fc > 0 means higher in A
 condition_pairs <- function(samples) {
   pairs <- combn(unique(samples$condition), 2, simplify = FALSE)
   set_names(pairs, map_chr(pairs, \(p) str_c(p[1], "_vs_", p[2])))
+}
+
+contrast_labels <- function(samples) {
+  labels <- condition_labels(samples)
+  map_chr(condition_pairs(samples), \(p) str_c(labels[[p[1]]], " vs ", labels[[p[2]]]))
 }
 
 read_de <- function(dir, samples) {
@@ -64,8 +76,8 @@ count_significant <- function(de) {
 
 DIRECTION_COLOURS <- c(up = "#B2182B", down = "#2166AC", ns = "grey75")
 
-# Volcano of one contrast; expects the direction column from call_significance()
-volcano_plot <- function(stats, criterion, n_labels = 10) {
+# Volcano of one contrast with up/down counts in the top corners; expects the direction column from call_significance()
+volcano_plot <- function(stats, criterion, title, n_labels = 10) {
   labelled <- stats |> filter(direction != "ns") |> slice_min(pvalue, n = n_labels, with_ties = FALSE)
   fc <- criterion$log2fc %||% 0
 
@@ -79,6 +91,11 @@ volcano_plot <- function(stats, criterion, n_labels = 10) {
     p_line +
     fc_line +
     ggrepel::geom_text_repel(aes(label = gene), data = labelled, size = 2.5, max.overlaps = Inf, show.legend = FALSE) +
-    scale_colour_manual(values = DIRECTION_COLOURS, breaks = c("up", "down")) +
-    labs(x = "log2 fold change", y = "-log10 p-value", colour = NULL)
+    annotate("label", x = -Inf, y = Inf, hjust = -0.1, vjust = 1.3, label = str_glue("{sum(stats$direction == 'down')} down"),
+             colour = DIRECTION_COLOURS[["down"]], fontface = "bold", label.size = 0) +
+    annotate("label", x = Inf, y = Inf, hjust = 1.1, vjust = 1.3, label = str_glue("{sum(stats$direction == 'up')} up"),
+             colour = DIRECTION_COLOURS[["up"]], fontface = "bold", label.size = 0) +
+    scale_colour_manual(values = DIRECTION_COLOURS, breaks = c("up", "down"), guide = "none") +
+    scale_y_continuous(expand = expansion(mult = c(0.02, 0.12))) +
+    labs(title = title, x = "log2 fold change", y = "-log10 p-value")
 }

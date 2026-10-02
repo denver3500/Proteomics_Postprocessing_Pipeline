@@ -21,7 +21,7 @@ MAX_MEDIAN_SHIFT <- 1  # median intensity: > 1 log2 (2-fold) away from the typic
 is_outlier <- function(x, side) side * (x - median(x, na.rm = TRUE)) > OUTLIER_MADS * mad(x, na.rm = TRUE)
 
 samples  <- read_tsv(snakemake@input$samples, show_col_types = FALSE) |>
-  mutate(condition = fct_inorder(condition))  # keep sample-sheet order in tables and plots
+  mutate(condition = fct_inorder(label))  # readable labels (one per condition), in sample-sheet order
 proteins <- read_tsv(snakemake@input$intensities, show_col_types = FALSE)
 raw      <- read_table(snakemake@input$table)
 sheet    <- read_tsv(snakemake@input$sheet, col_types = cols(.default = "c"))

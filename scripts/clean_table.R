@@ -4,6 +4,7 @@ source("scripts/common.R")
 raw <- read_table(snakemake@input$table)
 sheet_path <- snakemake@input$sheet
 sheet <- read_tsv(sheet_path, col_types = cols(.default = "c"))
+if (!"label" %in% names(sheet)) sheet$label <- NA_character_
 
 # Verify the approved sheet against the table
 stopifnot(
@@ -25,10 +26,13 @@ if (length(unlisted)) {
 samples <- sheet |>
   filter(if_all(any_of("exclude"), is.na)) |>  # keep rows without an exclude reason
   select(-any_of("exclude")) |>
-  mutate(replicate = as.integer(replicate)) |>
+  mutate(
+    replicate = as.integer(replicate),
+    label = str_squish(coalesce(label, default_label(condition)))
+  ) |>
   arrange(fct_inorder(condition), replicate) |>
   mutate(sample = str_c(condition, "_R", replicate), .before = 1) |>
-  relocate(condition, replicate, .after = sample) |>
+  relocate(condition, label, replicate, .after = sample) |>
   relocate(column, .after = last_col())
 
 stopifnot(
@@ -36,6 +40,13 @@ stopifnot(
     !anyNA(samples$condition) && !anyNA(samples$replicate),
   "sample names (condition_R#) are not unique" = !anyDuplicated(samples$sample)
 )
+
+# Plots show labels instead of conditions, so the two must match one to one
+labels <- distinct(samples, condition, label)
+if (anyDuplicated(labels$condition) || anyDuplicated(labels$label)) {
+  stop("each condition needs exactly one label, and labels must differ between conditions; check the label column of ",
+       sheet_path, call. = FALSE)
+}
 
 intensities <- raw |>
   select(any_of(names(ANNOTATION)), all_of(set_names(samples$column, samples$sample))) |>

@@ -17,6 +17,8 @@ III. Step 2 - QC
 
 For every approved dataset we write one report: results/Dataset/qc_report.html 
 
+The label column of samples.tsv is the readable name of a condition, shown in every report and plot (e.g. "M0 TRAP1 KO, DMEM" instead of M0_KO_DMEM). Use one label per condition; if empty, the condition with spaces instead of underscores is used. Files and folders always use the condition itself.
+
 To drop a sample, write a reason in the exclude column of Input/Dataset/samples.tsv and run the pipeline again; both steps are recomputed and the report lists the excluded samples.
 
 IV. Step 3 - Differential expression
